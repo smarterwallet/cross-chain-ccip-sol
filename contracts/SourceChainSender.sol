@@ -38,7 +38,7 @@ contract Sender is OwnerIsCreator {
         address to,
         uint256 amount
     ) external returns (bytes32 messageId) {
-        bytes memory functionCall = abi.encodeWithSignature("depositToken(address, uint256)", to, amount);
+        bytes memory functionCall = abi.encodeWithSignature("withdrawToken(address, uint256)", to, amount);
 
         Client.EVM2AnyMessage memory evm2AnyMessage = Client.EVM2AnyMessage({
             receiver: abi.encode(receiver), // ABI-encoded receiver address

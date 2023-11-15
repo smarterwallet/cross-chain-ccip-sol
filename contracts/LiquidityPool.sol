@@ -3,7 +3,6 @@ pragma solidity 0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "hardhat/console.sol";
 
 /* Errors */
@@ -14,21 +13,20 @@ error LiquidityPool__TransferFailed();
  * @author David Zhang
  * @notice Implement the function of cross-chain tokens on the destination chain
  */
-contract LiquidityPool is ReentrancyGuard, Ownable {
+contract LiquidityPool {
     /* State variables */
     IERC20 private immutable i_token;
     mapping(address => uint256) private balances;
 
     /* Events */
     event TokenInPut(address indexed sender, uint256 indexed amount);
-    event TokenOutPut(address indexed to, uint256 indexed amount);
 
     /* Public / External Functions */
-    constructor(address tokenAddress) Ownable(msg.sender) {
+    constructor(address tokenAddress) {
         i_token = IERC20(tokenAddress);
     }
 
-    function depositToken(uint256 amount) public onlyOwner {
+    function depositToken(uint256 amount) public {
         uint256 balanceBefore = i_token.balanceOf(address(this));
         bool success = i_token.transferFrom(msg.sender, address(this), amount);
         if (!success) {
@@ -39,11 +37,8 @@ contract LiquidityPool is ReentrancyGuard, Ownable {
         emit TokenInPut(msg.sender, amount);
     }
 
-    function withdrawToken(address to, uint256 amount) public nonReentrant {
-        uint256 balanceBefore = i_token.balanceOf(address(this));
+    function withdrawToken(address to, uint256 amount) external {
         i_token.transfer(to, amount);
-        require(i_token.balanceOf(address(this)) == balanceBefore - amount, "Transfer failed");
-        emit TokenOutPut(to, amount);
     }
 
     /* Getter Functions */

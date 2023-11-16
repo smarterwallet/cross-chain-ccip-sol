@@ -5,20 +5,20 @@ import {Client} from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.s
 import {CCIPReceiver} from "@chainlink/contracts-ccip/src/v0.8/ccip/applications/CCIPReceiver.sol";
 import "./LiquidityPool.sol";
 
-error DestChainReceiver__TransactionFailed();
-
 contract DestChainReceiver is CCIPReceiver {
+    /* Type declarations */
+    LiquidityPool private liquidityPool;
+
+    /* Events */
     event CallData(bytes indexed data);
 
-    LiquidityPool private immutable i_liquidityPool;
-
+    /* External / Public Functions */
     constructor(address router, address liquidityPoolAddress) CCIPReceiver(router) {
-        i_liquidityPool = LiquidityPool(liquidityPoolAddress);
+        liquidityPool = LiquidityPool(payable(liquidityPoolAddress));
     }
 
     function _ccipReceive(Client.Any2EVMMessage memory any2EvmMessage) internal override {
-        (bool success,) = address(i_liquidityPool).call(any2EvmMessage.data);
-        require(success);
-        emit CallData(any2EvmMessage.data);
+        (bool success,) = address(liquidityPool).call(any2EvmMessage.data);
+        require(success, "Transaction Failed");
     }
 }

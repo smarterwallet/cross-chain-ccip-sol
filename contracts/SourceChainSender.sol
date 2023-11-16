@@ -5,30 +5,74 @@ import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/
 import {OwnerIsCreator} from "@chainlink/contracts-ccip/src/v0.8/shared/access/OwnerIsCreator.sol";
 import {Client} from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
 import {LinkTokenInterface} from "@chainlink/contracts/src/v0.8/shared/interfaces/LinkTokenInterface.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract Sender is OwnerIsCreator {
+contract SourceChainSender is OwnerIsCreator, ReentrancyGuard {
+    /* Enums */
     enum payFeesIn {
         Native,
         LINK
     }
 
-    error NotEnoughBalance(uint256 currentBalance, uint256 calculatedFees); // Used to make sure contract has enough balance.
+    /* Type declarations */
+    IRouterClient private immutable i_router;
+    LinkTokenInterface private immutable i_linkToken;
+    IERC20 private immutable i_crossChainToken;
+    mapping(address => uint256) private balances;
 
-    event MessageSent( // The unique ID of the CCIP message.
+    /* Events */
+    event MessageSent(
         bytes32 indexed messageId,
         uint64 indexed destinationChainSelector,
         address receiver,
         address feeToken,
-        uint256 fees
+        uint256 fees,
+        address to,
+        uint256 amount
     );
+    event TokenInPut(address indexed sender, uint256 indexed amount);
+    event OwnerWithdrawn(address indexed owner, uint256 indexed amount);
+    event Withdrawn(address indexed owner, uint256 indexed amount);
 
-    IRouterClient router;
+    /* Errors */
+    error NotEnoughBalance(uint256 currentBalance, uint256 calculatedFees);
+    error SourceChainSender__NeedSendMore();
+    error SourceChainSender__TransferFailed();
+    error SourceChainSender__NeedFundToken();
+    error SourceChainSender__InsufficientBalance();
+    error SourceChainSender__Insufficient();
+    error SourceChainSender__WithdrawFailed();
 
-    LinkTokenInterface linkToken;
+    constructor(address _router, address _link, address _crossChainToken) {
+        i_router = IRouterClient(_router);
+        i_linkToken = LinkTokenInterface(_link);
+        i_crossChainToken = IERC20(_crossChainToken);
+    }
 
-    constructor(address _router, address _link) {
-        router = IRouterClient(_router);
-        linkToken = LinkTokenInterface(_link);
+    /* External / Public Functions */
+    function fund(uint256 amount) public {
+        if (amount < 0) {
+            revert SourceChainSender__NeedSendMore();
+        }
+        bool success = i_crossChainToken.transferFrom(msg.sender, address(this), amount);
+        if (!success) {
+            revert SourceChainSender__TransferFailed();
+        }
+        balances[msg.sender] += amount;
+        emit TokenInPut(msg.sender, amount);
+    }
+
+    function withdraw(uint256 amount) public nonReentrant {
+        if (i_crossChainToken.balanceOf(msg.sender) < 0) {
+            revert SourceChainSender__Insufficient();
+        }
+        balances[msg.sender] -= amount;
+        bool success = i_crossChainToken.transfer(msg.sender, amount);
+        if (!success) {
+            revert SourceChainSender__WithdrawFailed();
+        }
+        emit Withdrawn(msg.sender, amount);
     }
 
     function sendMessage(
@@ -38,47 +82,63 @@ contract Sender is OwnerIsCreator {
         address to,
         uint256 amount
     ) external returns (bytes32 messageId) {
-        bytes memory functionCall = abi.encodeWithSignature("withdrawToken(address, uint256)", to, amount);
+        if (balances[msg.sender] < amount) {
+            revert SourceChainSender__NeedFundToken();
+        }
+        bytes memory functionCall = abi.encodeWithSignature("withdrawToken(address,uint256)", to, amount);
 
         Client.EVM2AnyMessage memory evm2AnyMessage = Client.EVM2AnyMessage({
-            receiver: abi.encode(receiver), // ABI-encoded receiver address
-            data: functionCall, // ABI-encoded btyes
-            tokenAmounts: new Client.EVMTokenAmount[](0), // Empty array indicating no tokens are being sent
-            extraArgs: Client._argsToBytes(
-                // Additional arguments, setting gas limit and non-strict sequencing mode
-                Client.EVMExtraArgsV1({gasLimit: 200_000, strict: false})
-                ),
-            // Set the feeToken  address, indicating LINK will be used for fees
-            feeToken: feeToken == payFeesIn.LINK ? address(linkToken) : address(0)
+            receiver: abi.encode(receiver),
+            data: functionCall,
+            tokenAmounts: new Client.EVMTokenAmount[](0),
+            extraArgs: Client._argsToBytes(Client.EVMExtraArgsV1({gasLimit: 200_000, strict: false})),
+            feeToken: feeToken == payFeesIn.LINK ? address(i_linkToken) : address(0)
         });
 
-        // Get the fee required to send the message
-        uint256 fees = router.getFee(destinationChainSelector, evm2AnyMessage);
+        uint256 fees = i_router.getFee(destinationChainSelector, evm2AnyMessage);
 
         if (feeToken == payFeesIn.LINK) {
-            if (fees > linkToken.balanceOf(address(this))) {
-                revert NotEnoughBalance(linkToken.balanceOf(address(this)), fees);
+            if (fees > i_linkToken.balanceOf(address(this))) {
+                revert NotEnoughBalance(i_linkToken.balanceOf(address(this)), fees);
             }
 
-            // approve the Router to transfer LINK tokens on contract's behalf. It will spend the fees in LINK
-            linkToken.approve(address(router), fees);
+            i_linkToken.approve(address(i_router), fees);
 
-            // Send the message through the router and store the returned message ID
-            messageId = router.ccipSend(destinationChainSelector, evm2AnyMessage);
+            messageId = i_router.ccipSend(destinationChainSelector, evm2AnyMessage);
         } else {
             if (fees > address(this).balance) {
                 revert("balance is not enough");
             }
 
-            messageId = router.ccipSend{value: fees}(destinationChainSelector, evm2AnyMessage);
+            messageId = i_router.ccipSend{value: fees}(destinationChainSelector, evm2AnyMessage);
         }
 
-        // Emit an event with message details
-        emit MessageSent(messageId, destinationChainSelector, receiver, address(linkToken), fees);
+        emit MessageSent(messageId, destinationChainSelector, receiver, address(i_linkToken), fees, to, amount);
 
-        // Return the message ID
         return messageId;
     }
 
+    function onlyOwnerWithdraw(uint256 amount) public onlyOwner nonReentrant {
+        if (i_crossChainToken.balanceOf(address(this)) < 0) {
+            revert SourceChainSender__InsufficientBalance();
+        }
+        i_crossChainToken.transfer(owner(), amount);
+        emit OwnerWithdrawn(owner(), amount);
+    }
+
+    /* Getter Functions */
+    function getPoolBalance() external view returns (uint256) {
+        return i_crossChainToken.balanceOf(address(this));
+    }
+
+    function getFunderBalance() external view returns (uint256) {
+        return balances[msg.sender];
+    }
+
+    function getTokenAddress() public view returns (address) {
+        return address(i_crossChainToken);
+    }
+
+    /* fallback & receive */
     receive() external payable {}
 }

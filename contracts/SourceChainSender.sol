@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.19;
+pragma solidity ^0.8.19;
 
 import {IRouterClient} from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IRouterClient.sol";
 import {OwnerIsCreator} from "@chainlink/contracts-ccip/src/v0.8/shared/access/OwnerIsCreator.sol";
@@ -131,8 +131,8 @@ contract SourceChainSender is OwnerIsCreator, ReentrancyGuard {
         return i_crossChainToken.balanceOf(address(this));
     }
 
-    function getFunderBalance() external view returns (uint256) {
-        return balances[msg.sender];
+    function getFunderBalance(address funder) external view returns (uint256) {
+        return balances[funder];
     }
 
     function getTokenAddress() public view returns (address) {

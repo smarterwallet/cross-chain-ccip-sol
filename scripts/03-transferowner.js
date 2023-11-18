@@ -14,12 +14,13 @@ async function main() {
         deployer
     )
 
-    console.log(liquidityPoolContract.address)
+    console.log(`transfer ownership to ${receiverAddress}...`)
 
     const transferOwnerTx = await liquidityPoolContract.transferOwnership(
         receiverAddress
     )
     await transferOwnerTx.wait(1)
+    console.log(`transfer successful!`)
 }
 
 // main

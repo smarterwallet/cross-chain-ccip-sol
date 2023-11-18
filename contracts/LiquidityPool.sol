@@ -7,9 +7,10 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {console} from "hardhat/console.sol";
 
 /**
- * @title A sample Liquidity Pool
+ * @title deployed on the destination chain to provide users with a liquidity pool
  * @author David Zhang
  * @notice Implement the function of cross-chain tokens on the destination chain
+ * @dev The withdrawToken function is called by DestChainReceiver to transfer ERC20 to the cross-chain applicant
  */
 contract LiquidityPool is ReentrancyGuard, Ownable {
     /* Type declarations */
@@ -32,6 +33,11 @@ contract LiquidityPool is ReentrancyGuard, Ownable {
     }
 
     /* External / Public Functions */
+
+    /**
+     * @dev This function is used to deposit ERC20 tokens into the project direction liquidity pool for cross-chain users to withdraw.
+     * The project party deposits various ERC20 tokens for the contract, such as: USDT, USDC, DAI, LINK, WETH, WBTC.
+     */
     function depositToken(uint256 amount) public {
         if (amount == 0) {
             revert LiquidityPool__NeedSendMore();
@@ -44,6 +50,14 @@ contract LiquidityPool is ReentrancyGuard, Ownable {
         emit TokenInPut(msg.sender, amount);
     }
 
+    /**
+     * @dev This function is to transfer the ERC20 in the contract to the cross-chain applicant.
+     * Users can select the ERC20 that needs to be cross-chained on the front end
+     * @notice 1. onlyOwner: In order to prevent attackers from arbitrarily withdrawing tokens in the contract through the withdrawToken function,
+     * only the owner can call the withdrawToken function.
+     * The owner's address is DestChainReceiver.address, because the depositToken function is called between contracts through call(any2EvmMessage.data)
+     * 2. nonReentrant: Prevent attackers from launching reentrancy attacks on contracts
+     */
     function withdrawToken(address to, uint256 amount) external onlyOwner nonReentrant {
         if (i_token.balanceOf(address(this)) < amount) {
             revert LiquidityPool__InsufficientBalance();
@@ -57,8 +71,8 @@ contract LiquidityPool is ReentrancyGuard, Ownable {
         return i_token.balanceOf(address(this));
     }
 
-    function getFunderBalance() external view returns (uint256) {
-        return balances[msg.sender];
+    function getFundersBalance(address funderAddress) external view returns (uint256) {
+        return balances[funderAddress];
     }
 
     function getTokenAddress() public view returns (address) {
